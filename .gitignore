@@ -1,0 +1,33 @@
+# Models & Large Binary Files (Whisper weights)
+models/
+**/models/
+*.bin
+*.gguf
+*.mlmodelc/
+
+# macOS System Files
+.DS_Store
+*/.DS_Store
+
+# Xcode User Data & Temporary Files
+*.xcuserstate
+project.xcworkspace/xcuserdata/
+*.xcuserdatad/
+xcuserdata/
+DerivedData/
+build/
+*.build/
+
+# Breakpoints & Schemes personal state
+*.xcbkptlist
+
+# Swift Package Manager / Artifacts
+.build/
+Packages/
+.swiftpm/
+
+# Fastlane / Output binaries
+*.ipa
+*.dSYM.zip
+*.dSYM
+
