@@ -5,18 +5,41 @@
 //  Created by Amalendu Kar on 07/11/26.
 //
 
+import AVFoundation
 import Foundation
-import Speech
+import os
 import SwiftUI
 
 @Observable
 @MainActor
 final class NativeSpeechViewModel {
     
-    private let recorder = NativeSpeechRecorder()
-    let transcriber = NativeSpeechTranscriber()
+    private let recorder: NativeSpeechRecorder
+    private(set) var transcriber: any SpeechTranscriptionService
     
     private var streamingTask: Task<Void, Never>?
+    
+    // Engine Selection State
+    var selectedEngineMode: SpeechEngineMode {
+        didSet {
+            SpeechLog.viewModel.info("Switched to engine: \(self.selectedEngineMode.rawValue)")
+        }
+    }
+    
+    var isModernEngineSupported: Bool {
+        SpeechLocaleHelper.isModernSupported
+    }
+    
+    /// Two-way toggle property for UI binding
+    var isUsingModernEngine: Bool {
+        get {
+            selectedEngineMode == .modern
+        }
+        set {
+            let targetMode: SpeechEngineMode = newValue ? .modern : .legacy
+            switchEngine(to: targetMode)
+        }
+    }
     
     // UI State Properties
     var isRecording: Bool = false
@@ -27,37 +50,17 @@ final class NativeSpeechViewModel {
     // Selected Locale
     var selectedLocale: Locale = Locale.current {
         didSet {
-            selectedLocaleIdentifier = selectedLocale.identifier(.bcp47)
+            selectedLocaleIdentifier = selectedLocale.identifier
         }
     }
-    var selectedLocaleIdentifier: String = Locale.current.identifier(.bcp47)
+    var selectedLocaleIdentifier: String = Locale.current.identifier
     
     var selectedLocaleDisplayName: String {
         Locale.current.localizedString(forIdentifier: selectedLocaleIdentifier)
             ?? selectedLocaleIdentifier
     }
     
-    nonisolated struct LocaleItem: Identifiable, Hashable, Sendable {
-        let identifier: String
-        let name: String
-        let isInstalled: Bool
-        
-        var id: String { identifier }
-    }
-    
-    /// Default standard locales shown immediately while dynamic locales are fetched from SpeechTranscriber
-    private static let defaultLocales: [LocaleItem] = [
-        LocaleItem(identifier: "en-US", name: "English (US)", isInstalled: true),
-        LocaleItem(identifier: "es-ES", name: "Spanish (Spain)", isInstalled: false),
-        LocaleItem(identifier: "fr-FR", name: "French (France)", isInstalled: false),
-        LocaleItem(identifier: "de-DE", name: "German (Germany)", isInstalled: false),
-        LocaleItem(identifier: "it-IT", name: "Italian (Italy)", isInstalled: false),
-        LocaleItem(identifier: "hi-IN", name: "Hindi (India)", isInstalled: false),
-        LocaleItem(identifier: "zh-CN", name: "Chinese (Mandarin)", isInstalled: false),
-        LocaleItem(identifier: "ja-JP", name: "Japanese (Japan)", isInstalled: false)
-    ]
-    
-    var supportedLocales: [LocaleItem] = defaultLocales
+    var supportedLocales: [LocaleItem] = SpeechLocaleHelper.defaultLocaleItems
     
     var fullTranscript: String {
         transcriber.fullTranscript
@@ -71,35 +74,67 @@ final class NativeSpeechViewModel {
         transcriber.finalizedText
     }
     
-    init() {
+    var tokens: [SpeechTranscriptionToken] {
+        transcriber.tokens
+    }
+    
+    var engineDescription: String {
+        transcriber.engineDescription
+    }
+    
+    var isDownloadingModel: Bool {
+        transcriber.isDownloadingModel
+    }
+    
+    var downloadProgress: Progress? {
+        transcriber.downloadProgress
+    }
+    
+    /// Dependency-injected initializer: can inject any service conforming to SpeechTranscriptionService
+    init(
+        transcriber: (any SpeechTranscriptionService)? = nil,
+        engineMode: SpeechEngineMode? = nil,
+        recorder: NativeSpeechRecorder? = nil
+    ) {
+        self.recorder = recorder ?? NativeSpeechRecorder()
+        let initialMode = engineMode ?? (SpeechLocaleHelper.isModernSupported ? .modern : .legacy)
+        self.selectedEngineMode = initialMode
+        self.transcriber = transcriber ?? SpeechTranscriptionServiceFactory.makeService(forceLegacy: initialMode == .legacy)
         Task {
             await loadSupportedLocales()
         }
     }
     
-    /// Dynamically loads all supported and installed locales directly from Apple SpeechTranscriber.
-    func loadSupportedLocales() async {
-        let supported = await SpeechTranscriber.supportedLocales
-        let installed = await Set(SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) })
-        let current = Locale.current
+    /// Switch between Modern (SpeechAnalyzer) and Legacy (SFSpeechRecognizer) engines on the fly
+    func switchEngine(to mode: SpeechEngineMode) {
+        guard mode != selectedEngineMode else { return }
         
-        if !supported.isEmpty {
-            var items = supported.map { loc in
-                let bcp47 = loc.identifier(.bcp47)
-                let name = current.localizedString(forIdentifier: bcp47)
-                    ?? loc.localizedString(forIdentifier: bcp47)
-                    ?? bcp47
-                let isInstalled = installed.contains(bcp47)
-                return LocaleItem(identifier: bcp47, name: name, isInstalled: isInstalled)
-            }
-            
-            items.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            self.supportedLocales = items
-        } else {
-            self.supportedLocales = Self.defaultLocales.map { item in
-                LocaleItem(identifier: item.identifier, name: item.name, isInstalled: installed.contains(item.identifier))
+        if mode == .modern && !isModernEngineSupported {
+            errorMessage = "Modern SpeechAnalyzer engine requires iOS 26 or later."
+            return
+        }
+        
+        let wasRecording = isRecording
+        if wasRecording {
+            stop()
+        }
+        
+        self.selectedEngineMode = mode
+        let forceLegacy = (mode == .legacy)
+        self.transcriber = SpeechTranscriptionServiceFactory.makeService(forceLegacy: forceLegacy)
+        
+        Task {
+            await loadSupportedLocales()
+            if wasRecording {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                start()
             }
         }
+    }
+    
+    /// Dynamically loads supported locales for the active engine
+    func loadSupportedLocales() async {
+        self.supportedLocales = await SpeechLocaleHelper.loadSupportedLocales(for: selectedEngineMode)
     }
     
     func start() {
@@ -121,6 +156,7 @@ final class NativeSpeechViewModel {
             } catch {
                 if !Task.isCancelled {
                     self.errorMessage = error.localizedDescription
+                    SpeechLog.viewModel.error("Transcription error: \(error.localizedDescription)")
                 }
             }
             self.isRecording = false
@@ -165,4 +201,3 @@ final class NativeSpeechViewModel {
         }
     }
 }
-

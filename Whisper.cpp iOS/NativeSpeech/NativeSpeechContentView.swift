@@ -18,6 +18,45 @@ struct NativeSpeechContentView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
+                // Engine Switch Control (Toggle between Modern and Legacy)
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Image(systemName: viewModel.selectedEngineMode == .modern ? "bolt.badge.sparkle" : "clock.arrow.circlepath")
+                                .foregroundStyle(viewModel.selectedEngineMode == .modern ? .blue : .orange)
+                            
+                            Text(viewModel.selectedEngineMode == .modern ? "Modern Engine (iOS 26+)" : "Legacy Engine (SFSpeech)")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        }
+                        
+                        Text(viewModel.selectedEngineMode == .modern ? "SpeechAnalyzer & Foundation Transcriber" : "SFSpeechRecognizer Audio Stream")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        
+                        if !viewModel.isModernEngineSupported {
+                            Text("Modern engine requires iOS 26 or later")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    Toggle("", isOn: $viewModel.isUsingModernEngine)
+                        .labelsHidden()
+                        .disabled(!viewModel.isModernEngineSupported)
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(uiColor: .secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.blue.opacity(0.15), lineWidth: 1)
+                )
+                
                 // Error Banner / Display
                 if let errorMessage = viewModel.errorMessage {
                     HStack(alignment: .top, spacing: 10) {
@@ -57,7 +96,7 @@ struct NativeSpeechContentView: View {
                 
                 // Status & Language Header
                 HStack {
-                    if viewModel.transcriber.isDownloadingModel {
+                    if viewModel.isDownloadingModel {
                         HStack(spacing: 6) {
                             ProgressView()
                                 .controlSize(.small)
@@ -120,6 +159,27 @@ struct NativeSpeechContentView: View {
                     }
                 }
                 
+                // Active Engine Identifier & Tokens Bar
+                HStack {
+                    HStack(spacing: 4) {
+                        Image(systemName: "waveform.badge.magnifyingglass")
+                        Text(viewModel.engineDescription)
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    
+                    Spacer()
+                    
+                    if !viewModel.tokens.isEmpty {
+                        Text("\(viewModel.tokens.count) tokens")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.gray.opacity(0.15)))
+                    }
+                }
+                
                 // Full Transcript Section
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -149,7 +209,7 @@ struct NativeSpeechContentView: View {
                     
                     ScrollViewReader { proxy in
                         ScrollView {
-                            Text(viewModel.fullTranscript.isEmpty ? "Native Apple Speech transcription will appear here..." : viewModel.fullTranscript)
+                            Text(viewModel.fullTranscript.isEmpty ? "Transcription will appear here..." : viewModel.fullTranscript)
                                 .font(.body)
                                 .foregroundStyle(viewModel.fullTranscript.isEmpty ? .secondary : .primary)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -233,7 +293,7 @@ struct NativeSpeechContentView: View {
                 .padding(.top, 4)
             }
             .padding()
-            .navigationTitle("Apple Speech")
+            .navigationTitle("Live Speech")
         }
     }
 }
