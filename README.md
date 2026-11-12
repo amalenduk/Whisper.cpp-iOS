@@ -177,16 +177,21 @@ public enum SpeechTranscriptionServiceFactory {
 }
 ```
 
-### 3. Smart Locale Matching (`SpeechLocaleHelper`)
-Resolves language requests gracefully when switching between engines:
+### 3. Smart Locale Matching & Engine Switch Fallback (`SpeechLocaleHelper`)
+Handles dynamic language adaptation when switching engines or launching:
 ```swift
-// Example: If user selects "hi-IN" (Hindi) on Modern, it matches the closest valid fallback.
-// When toggled back to Legacy, full "hi-IN" (Devanagari) is immediately selected.
-let resolvedID = SpeechLocaleHelper.findBestMatchingLocale(
-    for: requestedIdentifier,
-    in: availableIdentifiers
+// Fallback hierarchy when switching engines (e.g. Legacy with Hindi -> Modern):
+// 1. Current selected locale (if supported by the new engine)
+// 2. Device current locale (`Locale.current`, if supported by the new engine)
+// 3. English ("en-US" or first available English locale)
+// 4. First available supported locale
+let resolvedID = SpeechLocaleHelper.resolveLocaleOnEngineSwitch(
+    currentSelection: selectedLocaleIdentifier,
+    availableLocales: supportedLocales
 )
 ```
+* **Seamless Hindi Example**: If a user is dictating in Hindi (`hi-IN`) on the Legacy engine and toggles to the Modern engine (which lacks Hindi in its 30 locales), the system automatically falls back to the device's default locale. If the device's default locale is also Hindi or unsupported in Modern, it defaults to English (`en-US`).
+* **Preserves Valid Locales**: If the user has Spanish (`es-ES`) or French (`fr-FR`) selected, switching between engines preserves their selection since both engines support those languages.
 
 ### 4. Interactive Switch Toggle in UI
 In [`NativeSpeechContentView.swift`](file:///Users/amal/Desktop/Projects/Whisper.cpp%20iOS/Whisper.cpp%20iOS/NativeSpeech/NativeSpeechContentView.swift), an engine switch card allows instant switching:

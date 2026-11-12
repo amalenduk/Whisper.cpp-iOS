@@ -111,39 +111,82 @@ public enum SpeechLocaleHelper {
         return false
     }
     
-    /// Finds the best matching locale among available options.
-    /// Handles exact match -> language + region -> language-only match -> fallback.
-    public static func findBestMatchingLocale(
-        for requestedIdentifier: String,
-        in availableIdentifiers: [String]
-    ) -> String {
-        let normalizedReq = requestedIdentifier.replacingOccurrences(of: "_", with: "-").lowercased()
+    /// Compares two locale identifiers for equivalence, ignoring case and hyphen/underscore differences (e.g. "en_US" vs "en-US").
+    public static func isEquivalent(_ id1: String, _ id2: String) -> Bool {
+        id1.replacingOccurrences(of: "_", with: "-").lowercased() ==
+        id2.replacingOccurrences(of: "_", with: "-").lowercased()
+    }
+    
+    /// Finds a matching identifier in a list based on exact match or language prefix match.
+    public static func findMatch(for requested: String, in list: [String]) -> String? {
+        let normalized = requested.replacingOccurrences(of: "_", with: "-").lowercased()
         
-        // 1. Exact match
-        if let exact = availableIdentifiers.first(where: {
-            $0.replacingOccurrences(of: "_", with: "-").lowercased() == normalizedReq
-        }) {
+        // 1. Exact match (case & hyphen-insensitive)
+        if let exact = list.first(where: { isEquivalent($0, requested) }) {
             return exact
         }
         
-        // 2. Language code match (e.g. "hi-IN" -> matches any "hi-*")
-        let reqComponents = normalizedReq.split(separator: "-")
-        if let reqLang = reqComponents.first {
-            if let langMatch = availableIdentifiers.first(where: {
+        // 2. Language prefix match (e.g. "hi-IN" or "hi-Latn" -> matches "hi-*", "fr-BE" -> "fr-*")
+        let components = normalized.split(separator: "-")
+        if let lang = components.first, !lang.isEmpty {
+            if let langMatch = list.first(where: {
                 let comp = $0.replacingOccurrences(of: "_", with: "-").lowercased().split(separator: "-")
-                return comp.first == reqLang
+                return comp.first == lang
             }) {
                 return langMatch
             }
         }
         
-        // 3. Fallback to English (US) if available, or first item
-        if let enUS = availableIdentifiers.first(where: {
-            $0.replacingOccurrences(of: "_", with: "-").lowercased().hasPrefix("en")
-        }) {
-            return enUS
+        return nil
+    }
+    
+    /// Resolves the most appropriate locale when switching engines or initializing.
+    ///
+    /// Fallback hierarchy:
+    /// 1. Currently selected locale (if available or compatible in the new engine)
+    /// 2. Device current locale (`Locale.current`, if available in the new engine)
+    /// 3. English ("en-US" or any available "en-*")
+    /// 4. First available supported locale
+    public static func resolveLocaleOnEngineSwitch(
+        currentSelection: String,
+        availableLocales: [LocaleItem]
+    ) -> String {
+        guard !availableLocales.isEmpty else {
+            return currentSelection
+        }
+        let availableIds = availableLocales.map { $0.identifier }
+        return findBestMatchingLocale(for: currentSelection, in: availableIds)
+    }
+    
+    /// Finds the best matching locale among available options using the fallback hierarchy:
+    /// Requested -> Device Locale.current -> English -> First available.
+    public static func findBestMatchingLocale(
+        for requestedIdentifier: String,
+        in availableIdentifiers: [String]
+    ) -> String {
+        // 1. Check if requested identifier is directly supported (exact or language prefix)
+        if let match = findMatch(for: requestedIdentifier, in: availableIdentifiers) {
+            return match
         }
         
+        // 2. If requested is not available (e.g. Hindi in Modern engine), fallback to device current locale
+        let deviceLocaleId = Locale.current.identifier
+        if let deviceMatch = findMatch(for: deviceLocaleId, in: availableIdentifiers) {
+            return deviceMatch
+        }
+        
+        // 3. If device locale is also not supported, fallback to English ("en-US" or any "en-*")
+        if let enUS = availableIdentifiers.first(where: { isEquivalent($0, "en-US") }) {
+            return enUS
+        }
+        if let anyEn = availableIdentifiers.first(where: {
+            let normalized = $0.replacingOccurrences(of: "_", with: "-").lowercased()
+            return normalized.hasPrefix("en-") || normalized == "en"
+        }) {
+            return anyEn
+        }
+        
+        // 4. Ultimate fallback to the first available locale
         return availableIdentifiers.first ?? requestedIdentifier
     }
 }

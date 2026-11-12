@@ -135,7 +135,7 @@ struct NativeSpeechContentView: View {
                             } label: {
                                 HStack {
                                     Text(item.name)
-                                    if viewModel.selectedLocaleIdentifier == item.identifier {
+                                    if SpeechLocaleHelper.isEquivalent(viewModel.selectedLocaleIdentifier, item.identifier) {
                                         Image(systemName: "checkmark")
                                     } else if !item.isInstalled {
                                         Image(systemName: "icloud.and.arrow.down")

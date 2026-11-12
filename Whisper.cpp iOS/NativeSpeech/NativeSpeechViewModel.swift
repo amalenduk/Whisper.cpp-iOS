@@ -48,11 +48,7 @@ final class NativeSpeechViewModel {
     var errorMessage: String? = nil
     
     // Selected Locale
-    var selectedLocale: Locale = Locale.current {
-        didSet {
-            selectedLocaleIdentifier = selectedLocale.identifier
-        }
-    }
+    var selectedLocale: Locale = Locale.current
     var selectedLocaleIdentifier: String = Locale.current.identifier
     
     var selectedLocaleDisplayName: String {
@@ -102,6 +98,7 @@ final class NativeSpeechViewModel {
         self.transcriber = transcriber ?? SpeechTranscriptionServiceFactory.makeService(forceLegacy: initialMode == .legacy)
         Task {
             await loadSupportedLocales()
+            resolveLocaleForActiveEngine()
         }
     }
     
@@ -125,6 +122,8 @@ final class NativeSpeechViewModel {
         
         Task {
             await loadSupportedLocales()
+            resolveLocaleForActiveEngine()
+            
             if wasRecording {
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 start()
@@ -135,6 +134,28 @@ final class NativeSpeechViewModel {
     /// Dynamically loads supported locales for the active engine
     func loadSupportedLocales() async {
         self.supportedLocales = await SpeechLocaleHelper.loadSupportedLocales(for: selectedEngineMode)
+    }
+    
+    /// Sets locale and updates state
+    func setLocale(identifier: String) {
+        self.selectedLocaleIdentifier = identifier
+        self.selectedLocale = Locale(identifier: identifier)
+    }
+    
+    /// Resolves the most appropriate locale for the active engine using the fallback hierarchy:
+    /// 1. Currently selected locale (if supported)
+    /// 2. Device current locale (`Locale.current`, if supported)
+    /// 3. English ("en-US" or first available English locale)
+    /// 4. First available supported locale
+    func resolveLocaleForActiveEngine() {
+        let bestIdentifier = SpeechLocaleHelper.resolveLocaleOnEngineSwitch(
+            currentSelection: selectedLocaleIdentifier,
+            availableLocales: supportedLocales
+        )
+        if !SpeechLocaleHelper.isEquivalent(bestIdentifier, selectedLocaleIdentifier) {
+            SpeechLog.viewModel.info("Engine switched to \(self.selectedEngineMode.shortTitle): adjusted locale from '\(self.selectedLocaleIdentifier)' to '\(bestIdentifier)'")
+        }
+        setLocale(identifier: bestIdentifier)
     }
     
     func start() {
@@ -189,7 +210,7 @@ final class NativeSpeechViewModel {
     }
     
     func updateLocaleAndRestart(identifier: String) {
-        selectedLocale = Locale(identifier: identifier)
+        setLocale(identifier: identifier)
         let wasRecording = isRecording
         
         if wasRecording {
